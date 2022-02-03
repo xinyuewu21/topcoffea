@@ -18,7 +18,8 @@ def test_topcoffea():
         "-o",
         "output_check_yields",
         "-p",
-        "analysis/topEFT/histos/"
+        "analysis/topEFT/histos/",
+        "--fixed-seed"
     ]
 
     # Run TopCoffea

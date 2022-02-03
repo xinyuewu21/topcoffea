@@ -28,7 +28,8 @@ def test_topcoffea_wq():
         "--chunksize",
         "500",
         "--nchunks",
-        "1"
+        "1",
+        "--fixed-seed"
     ]
 
     # Run TopCoffea

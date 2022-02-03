@@ -51,7 +51,7 @@ def construct_cat_name(chan_str,njet_str=None,flav_str=None):
 
 class AnalysisProcessor(processor.ProcessorABC):
 
-    def __init__(self, samples, wc_names_lst=[], hist_lst=None, do_errors=False, do_systematics=False, split_by_lepton_flavor=False, skip_signal_regions=False, skip_control_regions=False, muonSyst='nominal', dtype=np.float32):
+    def __init__(self, samples, wc_names_lst=[], hist_lst=None, do_errors=False, do_systematics=False, split_by_lepton_flavor=False, skip_signal_regions=False, skip_control_regions=False, muonSyst='nominal', dtype=np.float32, fixed_seed=False):
 
         self._samples = samples
         self._wc_names_lst = wc_names_lst
@@ -89,6 +89,7 @@ class AnalysisProcessor(processor.ProcessorABC):
         self._split_by_lepton_flavor = split_by_lepton_flavor # Whether to keep track of lepton flavors individually
         self._skip_signal_regions = skip_signal_regions # Whether to skip the SR categories
         self._skip_control_regions = skip_control_regions # Whether to skip the CR categories
+        self._fixed_seed = fixed_seed # Fix the numpy seed used for e.g. Rochester corrections (for testing ONLY)
 
         
 
@@ -176,9 +177,9 @@ class AnalysisProcessor(processor.ProcessorABC):
         else: syst_var_list = ['nominal']
         for syst_var in syst_var_list:
           mu["pt"]=mu.pt_raw
-          if syst_var == 'MuonESUp': mu["pt"]=ApplyRochesterCorrections(mu, isData, var='up')
-          elif syst_var == 'MuonESDown': mu["pt"]=ApplyRochesterCorrections(mu, isData, var='down')
-          else: mu["pt"]=ApplyRochesterCorrections(mu, isData, var='nominal')
+          if syst_var == 'MuonESUp': mu["pt"]=ApplyRochesterCorrections(mu, isData, var='up', fixed_seed=self._fixed_seed)
+          elif syst_var == 'MuonESDown': mu["pt"]=ApplyRochesterCorrections(mu, isData, var='down', fixed_seed=self._fixed_seed)
+          else: mu["pt"]=ApplyRochesterCorrections(mu, isData, var='nominal', fixed_seed=self._fixed_seed)
           # Muon selection
           mu["isPres"] = isPresMuon(mu.dxy, mu.dz, mu.sip3d, mu.eta, mu.pt, mu.miniPFRelIso_all)
           mu["isLooseM"] = isLooseMuon(mu.miniPFRelIso_all,mu.sip3d,mu.looseId)
