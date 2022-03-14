@@ -115,12 +115,25 @@ class AnalysisProcessor(processor.ProcessorABC):
 
         # Dataset parameters
         dataset = events.metadata["dataset"]
-        histAxisName = self._samples[dataset]["histAxisName"]
-        year         = self._samples[dataset]["year"]
-        xsec         = self._samples[dataset]["xsec"]
-        sow          = self._samples[dataset]["nSumOfWeights"]
-        isData       = self._samples[dataset]["isData"]
-        datasets     = ["SingleMuon", "SingleElectron", "EGamma", "MuonEG", "DoubleMuon", "DoubleElectron", "DoubleEG"]
+
+        isData             = self._samples[dataset]["isData"]
+        histAxisName       = self._samples[dataset]["histAxisName"]
+        year               = self._samples[dataset]["year"]
+        xsec               = self._samples[dataset]["xsec"]
+        sow                = self._samples[dataset]["nSumOfWeights"]
+        if not isData:
+            sow_ISRUp          = self._samples[dataset]["nSumOfWeights_ISRUp"]
+            sow_ISRDown        = self._samples[dataset]["nSumOfWeights_ISRDown"]
+            sow_FSRUp          = self._samples[dataset]["nSumOfWeights_FSRUp"]
+            sow_FSRDown        = self._samples[dataset]["nSumOfWeights_FSRDown"]
+            sow_renormUp       = self._samples[dataset]["nSumOfWeights_renormUp"]
+            sow_renormDown     = self._samples[dataset]["nSumOfWeights_renormDown"]
+            sow_factUp         = self._samples[dataset]["nSumOfWeights_factUp"]
+            sow_factDown       = self._samples[dataset]["nSumOfWeights_factDown"]
+            sow_renormfactUp   = self._samples[dataset]["nSumOfWeights_renormfactUp"]
+            sow_renormfactDown = self._samples[dataset]["nSumOfWeights_renormfactDown"]
+
+        datasets = ["SingleMuon", "SingleElectron", "EGamma", "MuonEG", "DoubleMuon", "DoubleElectron", "DoubleEG"]
         for d in datasets: 
             if d in dataset: dataset = dataset.split('_')[0] 
 
@@ -179,31 +192,50 @@ class AnalysisProcessor(processor.ProcessorABC):
         e["isFO"] = isFOElec(e.conept, e.btagDeepFlavB, e.idEmu, e.convVeto, e.lostHits, e.mvaTTH, e.jetRelIso, e.mvaFall17V2noIso_WP80, year)
         e["isTightLep"] = tightSelElec(e.isFO, e.mvaTTH)
 
-        ######### Event weights ###########
+
+        ######### Systematics ###########
+
+        # Define the lists of systematics we include
+        obj_correction_syst_lst = [
+            'MuonESUp','MuonESDown','JERUp','JERDown','JESUp','JESDown' # Systs that affect the kinematics of objects
+        ]
+        wgt_correction_syst_lst = [
+            "lepSFUp","lepSFDown","btagSFUp","btagSFDown","PUUp","PUDown","PreFiringUp","PreFiringDown","triggerSFUp","triggerSFDown", # Exp systs
+            "FSRUp","FSRDown","ISRUp","ISRDown","renormUp","renormDown","factUp","factDown","renormfactUp","renormfactDown",           # Theory systs
+        ]
+
         # These weights can go outside of the outside sys loop since they do not depend on pt of mu or jets
         # We only calculate these values if not isData
         # Note: add() will generally modify up/down weights, so if these are needed for any reason after this point, we should instead pass copies to add()
         weights_any_lep_cat = coffea.analysis_tools.Weights(len(events),storeIndividual=True)
         if not isData:
-            # These could probably go outside of the sys loop
-            # Attach PS weights (ISR/FSR)
+
+            # If this is no an eft sample, get the genWeight
+            if eft_coeffs is None: genw = events["genWeight"]
+            else: genw= np.ones_like(events["event"])
+
+            # Normalize by (xsec/sow)*genw where genw is 1 for EFT samples
+            # Note that for theory systs, will need to multiply by sow/sow_wgtUP to get (xsec/sow_wgtUp)*genw and same for Down
+            weights_any_lep_cat.add("norm",(xsec/sow)*genw)
+
+            # Attach PS weights (ISR/FSR) and scale weights (renormalization/factorization) and PDF weights
             AttachPSWeights(events)
-            # Attach scale weights (renormalization/factorization)
             AttachScaleWeights(events)
-            # Attach PDF weights
-            #AttachPdfWeights(events) # FIXME use these!
+            #AttachPdfWeights(events) # TODO
             # FSR/ISR weights
-            weights_any_lep_cat.add('ISR', events.ISRnom, events.ISRUp, events.ISRDown)
-            weights_any_lep_cat.add('FSR', events.FSRnom, events.FSRUp, events.FSRDown)
+            weights_any_lep_cat.add('ISR', events.nom, events.ISRUp*(sow/sow_ISRUp), events.ISRDown*(sow/sow_ISRDown)) # For nom just use nom from LHEScaleWeight since it's just 1
+            weights_any_lep_cat.add('FSR', events.nom, events.FSRUp*(sow/sow_FSRUp), events.FSRDown*(sow/sow_FSRDown)) # For nom just use nom from LHEScaleWeight since it's just 1
             # renorm/fact scale
-            weights_any_lep_cat.add('renorm',      events.nom, events.renormUp,      events.renormDown)
-            weights_any_lep_cat.add('fact',        events.nom, events.factUp,        events.factDown)
-            weights_any_lep_cat.add('renorm_fact', events.nom, events.renorm_factUp, events.renorm_factDown)
+            weights_any_lep_cat.add('renorm',     events.nom, events.renormUp*(sow/sow_renormUp),         events.renormDown*(sow/sow_renormDown))
+            weights_any_lep_cat.add('fact',       events.nom, events.factUp*(sow/sow_factUp),             events.factDown*(sow/sow_factDown))
+            weights_any_lep_cat.add('renormfact', events.nom, events.renormfactUp*(sow/sow_renormfactUp), events.renormfactDown*(sow/sow_renormfactDown))
             # Prefiring and PU (note prefire weights only available in nanoAODv9)
             weights_any_lep_cat.add('PreFiring', events.L1PreFiringWeight.Nom,  events.L1PreFiringWeight.Up,  events.L1PreFiringWeight.Dn)
             weights_any_lep_cat.add('PU', GetPUSF((events.Pileup.nTrueInt), year), GetPUSF(events.Pileup.nTrueInt, year, 'up'), GetPUSF(events.Pileup.nTrueInt, year, 'down'))
 
-        # Update muon and jet kinematics with Rochester corrections and JER/JES
+
+        ######### The rest of the processor is inside this loop over systs that affect object kinematics  ###########
+
         mu["pt_raw"]=mu.pt
         met_raw=met
         if self._do_systematics : syst_var_list = ['MuonESUp','MuonESDown','JERUp','JERDown','JESUp','JESDown','nominal']
