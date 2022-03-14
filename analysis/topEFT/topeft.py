@@ -238,7 +238,7 @@ class AnalysisProcessor(processor.ProcessorABC):
 
         mu["pt_raw"]=mu.pt
         met_raw=met
-        if self._do_systematics : syst_var_list = ['MuonESUp','MuonESDown','JERUp','JERDown','JESUp','JESDown','nominal']
+        if self._do_systematics : syst_var_list = ["nominal"] + obj_correction_syst_lst
         else: syst_var_list = ['nominal']
         for syst_var in syst_var_list:
             mu["pt"]=mu.pt_raw
@@ -391,8 +391,6 @@ class AnalysisProcessor(processor.ProcessorABC):
 
             # Loop over categories and fill the dict
             weights_dict = {}
-            if (isData or (eft_coeffs is not None)): genw = np.ones_like(events["event"])
-            else: genw = events["genWeight"]
             GetTriggerSF(year,events,l0,l1)
             for ch_name in ["2l", "2l_4t", "3l", "4l", "2l_CR", "3l_CR", "2los_CRtt", "2los_CRZ", "2lss_CRZ"]:
 
@@ -405,13 +403,11 @@ class AnalysisProcessor(processor.ProcessorABC):
 
                 # For data only
                 if isData:
-                    weights_dict[ch_name].add("norm",genw)
                     if "2l" in ch_name:
                         weights_dict[ch_name].add("fliprate", events.flipfactor_2l)
 
                 # For MC only
                 if not isData:
-                    weights_dict[ch_name].add("norm",(xsec/sow)*genw)
                     weights_dict[ch_name].add("btagSF", pData/pMC, pDataUp/pMC, pDataDo/pMC) # Note, should not need to copy here since not modifying pData or pMC # In principle does not have to be in the lep cat loop
                     weights_dict[ch_name].add("triggerSF", events.trigger_sf, copy.deepcopy(events.trigger_sfUp), copy.deepcopy(events.trigger_sfDown))            # In principle does not have to be in the lep cat loop
                     if "2l" in ch_name:
@@ -421,10 +417,6 @@ class AnalysisProcessor(processor.ProcessorABC):
                     if "4l" in ch_name:
                         weights_dict[ch_name].add("lepSF", events.sf_4l, copy.deepcopy(events.sf_4l_hi), copy.deepcopy(events.sf_4l_lo))
 
-            # Set the list of systematics to loop over when we fill hists
-            systList = ["nominal"]
-            if   (self._do_systematics and not isData and (syst_var == "nominal")): systList = systList + ["lepSFUp","lepSFDown","btagSFUp", "btagSFDown","PUUp","PUDown","PreFiringUp","PreFiringDown","FSRUp","FSRDown","ISRUp","ISRDown","renormUp","renormDown","factUp","factDown","renorm_factUp","renorm_factDown","triggerSFUp","triggerSFDown"]
-            elif (self._do_systematics and not isData and (syst_var != "nominal")): systList = [syst_var]
 
 
             ######### Masks we need for the selection ##########
@@ -725,19 +717,29 @@ class AnalysisProcessor(processor.ProcessorABC):
                   print(f"Skipping \"{dense_axis_name}\", it is not in the list of hists to include.")
                   continue
 
+              # Set up the list of syst wgt variations to loop over
+              wgt_var_lst = ["nominal"]
+              if   (self._do_systematics and not isData and (syst_var == "nominal")): wgt_var_lst = wgt_var_lst + wgt_correction_syst_lst
+              elif (self._do_systematics and not isData and (syst_var != "nominal")): wgt_var_lst = [syst_var]
+
               # Loop over the systematics
-              for syst in systList:
-                  # In the case of "nominal", or the jet energy systematics, no weight systematic variation is used (weight_fluct=None)
-                  weight_fluct = syst
-                  if syst in ["nominal","JERUp","JERDown","JESUp","JESDown","MuonESUp","MuonESDown"]: weight_fluct = None # No weight systematic for these variations
+              for wgt_fluct in wgt_var_lst:
 
                   # Loop over nlep categories "2l", "3l", "4l"
                   for nlep_cat in cat_dict.keys():
 
                       # Get the appropriate Weights object for the nlep cat and get the weight to be used when filling the hist
+                      # Need to do this inside of nlep cat loop since some wgts depend on lep cat
                       weights_object = weights_dict[nlep_cat]
-                      if isData : weight = weights_object.partial_weight(include=["FF"] + (["fliprate"] if nlep_cat in ["2l","2l_4t", "2l_CR"] else [])) # for data, must include the FF. The flip rate we only apply to 2lss regions
-                      else      : weight = weights_object.weight(weight_fluct) # For MC
+                      if isData:
+                          # for data, must include the FF. The flip rate we only apply to 2lss regions
+                          weight = weights_object.partial_weight(include=["FF"] + (["fliprate"] if nlep_cat in ["2l","2l_4t","2l_CR"] else []))
+                      elif (wgt_fluct == "nominal") or (wgt_fluct in obj_correction_syst_lst):
+                          # In the case of "nominal", or the jet energy systematics, no weight systematic variation is used
+                          weight = weights_object.weight(None)
+                      else:
+                          # Otherwise get the weight from the Weights object
+                          weight = weights_object.weight(wgt_fluct)
 
                       # Get a mask for events that pass any of the njet requiremens in this nlep cat
                       # Useful in cases like njets hist where we don't store njets in a sparse axis
@@ -783,7 +785,6 @@ class AnalysisProcessor(processor.ProcessorABC):
                                       weights_flat = weight[all_cuts_mask]
                                       eft_coeffs_cut = eft_coeffs[all_cuts_mask] if eft_coeffs is not None else None
                                       eft_w2_coeffs_cut = eft_w2_coeffs[all_cuts_mask] if eft_w2_coeffs is not None else None
-                                      print(ch_name)
 
                                       # Fill the histos
                                       axes_fill_info_dict = {
@@ -791,7 +792,7 @@ class AnalysisProcessor(processor.ProcessorABC):
                                           "channel"       : ch_name,
                                           "appl"          : appl,
                                           "sample"        : histAxisName,
-                                          "systematic"    : syst,
+                                          "systematic"    : wgt_fluct,
                                           "weight"        : weights_flat,
                                           "eft_coeff"     : eft_coeffs_cut,
                                           "eft_err_coeff" : eft_w2_coeffs_cut,
